@@ -1,0 +1,24 @@
+TO SET AUTOMATIC SSH CONNECTION only ec2-user work
+   sudo vi /etc/ssh/sshd_config
+   sudo systemctl restart sshd
+   ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+ 
+   ssh-copy-id ec2-user@TARGET_IP
+
+
+UBUNTU VERSION
+#5-  THEN SSH USER@IPADRESS
+NEW
+sudo apt update -y
+sudo vi /etc/ssh/sshd_config
+ 
+sudo vi /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+
+sudo systemctl restart ssh
+
+sudo sshd -T | egrep 'passwordauthentication|usepam'
+
+
+ssh ubuntu@TARGET_IP
+
+
