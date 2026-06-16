@@ -3,8 +3,8 @@
 # Update system
 sudo apt update -y
 
-# Install Java 17 (Required for Jenkins 2.541+)
-sudo apt install openjdk-17-jdk -y
+# Install Java 21(Required for Jenkins 2.541+)
+sudo apt install openjdk-21-jdk -y
 java -version
 
 # Install Maven (ONLY ONE METHOD - using apt)
