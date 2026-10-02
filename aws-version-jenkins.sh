@@ -1,86 +1,81 @@
 #!/bin/bash
 
-# =========================================================
-# Jenkins Setup Script
-# Amazon Linux 2023 / ec2-user
-# Java 21 + Maven + Git + Jenkins
-# =========================================================
+# ============================================================
+# AUTOMATIC JENKINS SERVER SETUP
+# Amazon Linux 2023
+#
+# Installs:
+#   - Java 21 Corretto
+#   - Maven
+#   - Git
+#   - Jenkins
+#
+# Configures:
+#   - Java 21 as system default
+#   - JAVA_HOME = Java 21
+#   - Maven -> Java 21
+#   - Jenkins -> Java 21
+#   - Jenkins service starts automatically
+# ============================================================
 
 set -euo pipefail
 
 echo ""
-echo "========================================================="
-echo "        JENKINS SERVER SETUP - AMAZON LINUX 2023"
-echo "========================================================="
+echo "============================================================"
+echo "        JENKINS SERVER AUTOMATIC SETUP"
+echo "============================================================"
 echo ""
 
-# =========================================================
+# ============================================================
 # 1. UPDATE SYSTEM
-# =========================================================
+# ============================================================
 
-echo "=========================================="
-echo " Updating system"
-echo "=========================================="
+echo "[1/12] Updating Amazon Linux..."
 
 sudo dnf update -y
 
-
-# =========================================================
+# ============================================================
 # 2. INSTALL JAVA 21
-# =========================================================
+# ============================================================
 
-echo "=========================================="
-echo " Installing Java 21 - Amazon Corretto"
-echo "=========================================="
+echo ""
+echo "[2/12] Installing Java 21..."
 
-sudo dnf install -y java-21-amazon-corretto
+sudo dnf install -y \
+    java-21-amazon-corretto \
+    java-21-amazon-corretto-devel
 
-
-# =========================================================
-# 3. FIND ACTUAL JAVA 21 BINARY
-# =========================================================
-
-echo "=========================================="
-echo " Detecting Java 21 installation"
-echo "=========================================="
-
-JAVA_BIN_21="$(rpm -ql java-21-amazon-corretto-headless \
-    | grep '/bin/java$' \
+# Find Java 21 automatically
+JAVA_BIN_21="$(find /usr/lib/jvm \
+    -type f \
+    -path '*/java-21*/bin/java' \
     | head -n 1)"
 
 if [ -z "${JAVA_BIN_21}" ]; then
-    echo "ERROR: Java 21 binary could not be found."
-    exit 1
-fi
-
-if [ ! -x "${JAVA_BIN_21}" ]; then
-    echo "ERROR: Java binary exists but is not executable:"
-    echo "${JAVA_BIN_21}"
+    echo ""
+    echo "ERROR: Java 21 was not found."
+    echo ""
+    echo "Installed JVMs:"
+    ls -la /usr/lib/jvm/
     exit 1
 fi
 
 JAVA_HOME_21="$(dirname "$(dirname "${JAVA_BIN_21}")")"
 
 echo ""
-echo "Java 21 binary:"
+echo "Java 21 executable:"
 echo "${JAVA_BIN_21}"
 
 echo ""
-echo "Java 21 home:"
+echo "Java 21 JAVA_HOME:"
 echo "${JAVA_HOME_21}"
 
+# ============================================================
+# 3. CONFIGURE JAVA 21 AS DEFAULT
+# ============================================================
+
 echo ""
-echo "Java 21 version:"
-"${JAVA_BIN_21}" -version
-
-
-# =========================================================
-# 4. CONFIGURE JAVA 21 AS SYSTEM DEFAULT
-# =========================================================
-
-echo "=========================================="
-echo " Setting Java 21 as system default"
-echo "=========================================="
+echo "[3/12] Configuring Java 21 as the default Java..."
 
 sudo alternatives --install \
     /usr/bin/java \
@@ -90,14 +85,8 @@ sudo alternatives --install \
 
 sudo alternatives --set java "${JAVA_BIN_21}"
 
-
-# =========================================================
-# 5. CONFIGURE JAVAC
-# =========================================================
-
+# Configure javac if available
 if [ -x "${JAVA_HOME_21}/bin/javac" ]; then
-
-    echo "Configuring javac..."
 
     sudo alternatives --install \
         /usr/bin/javac \
@@ -110,92 +99,155 @@ if [ -x "${JAVA_HOME_21}/bin/javac" ]; then
 
 fi
 
+# ============================================================
+# 4. REMOVE OLD JAVA 17 ENVIRONMENT SETTINGS
+# ============================================================
 
-# =========================================================
+echo ""
+echo "[4/12] Checking for old Java 17 environment settings..."
+
+# Remove old Java 17 profile files
+for FILE in /etc/profile.d/*.sh; do
+
+    if [ -f "$FILE" ]; then
+
+        if grep -q \
+            "java-17-amazon-corretto\|JAVA_HOME.*17" \
+            "$FILE" 2>/dev/null; then
+
+            echo "Removing old Java 17 settings from:"
+            echo "$FILE"
+
+            sudo sed -i \
+                '/java-17-amazon-corretto/d' \
+                "$FILE"
+
+            sudo sed -i \
+                '/JAVA_HOME.*17/d' \
+                "$FILE"
+
+        fi
+
+    fi
+
+done
+
+# Remove Java 17 references from ec2-user files
+for FILE in \
+    "$HOME/.bashrc" \
+    "$HOME/.bash_profile" \
+    "$HOME/.profile"
+do
+
+    if [ -f "$FILE" ]; then
+
+        sed -i \
+            '/java-17-amazon-corretto/d' \
+            "$FILE"
+
+        sed -i \
+            '/JAVA_HOME.*17/d' \
+            "$FILE"
+
+    fi
+
+done
+
+# ============================================================
+# 5. CONFIGURE JAVA_HOME GLOBALLY
+# ============================================================
+
+echo ""
+echo "[5/12] Configuring JAVA_HOME for Java 21..."
+
+sudo tee /etc/profile.d/java21.sh > /dev/null <<EOF
+export JAVA_HOME="${JAVA_HOME_21}"
+export PATH="\$JAVA_HOME/bin:\$PATH"
+EOF
+
+sudo chmod 644 /etc/profile.d/java21.sh
+
+# Configure current shell
+export JAVA_HOME="${JAVA_HOME_21}"
+export PATH="${JAVA_HOME}/bin:${PATH}"
+
+# ============================================================
 # 6. VERIFY JAVA
-# =========================================================
-
-echo "=========================================="
-echo " Verifying Java"
-echo "=========================================="
-
-echo "Java location:"
-which java
+# ============================================================
 
 echo ""
-
-echo "Java real path:"
-readlink -f "$(which java)"
+echo "[6/12] Verifying Java 21..."
 
 echo ""
+echo "JAVA_HOME:"
+echo "${JAVA_HOME}"
 
-echo "Java version:"
+echo ""
+echo "Java:"
 java -version
 
-
-# =========================================================
+# ============================================================
 # 7. INSTALL MAVEN
-# =========================================================
+# ============================================================
 
-echo "=========================================="
-echo " Installing Maven"
-echo "=========================================="
+echo ""
+echo "[7/12] Installing Maven..."
 
 sudo dnf install -y maven
 
+# Force Maven to use Java 21
+sudo tee /etc/mavenrc > /dev/null <<EOF
+JAVA_HOME="${JAVA_HOME_21}"
+export JAVA_HOME
+EOF
+
+# Verify Maven
 echo ""
-echo "Maven version:"
+echo "Maven:"
 mvn --version
 
-
-# =========================================================
+# ============================================================
 # 8. INSTALL GIT
-# =========================================================
+# ============================================================
 
-echo "=========================================="
-echo " Installing Git"
-echo "=========================================="
+echo ""
+echo "[8/12] Installing Git..."
 
 sudo dnf install -y git
 
 echo ""
-echo "Git version:"
+echo "Git:"
 git --version
 
+# ============================================================
+# 9. INSTALL JENKINS REPOSITORY
+# ============================================================
 
-# =========================================================
-# 9. ADD JENKINS REPOSITORY
-# =========================================================
+echo ""
+echo "[9/12] Installing Jenkins repository..."
 
-echo "=========================================="
-echo " Adding Jenkins repository"
-echo "=========================================="
-
-sudo wget -O /etc/yum.repos.d/jenkins.repo \
+sudo wget \
+    -O /etc/yum.repos.d/jenkins.repo \
     https://pkg.jenkins.io/redhat-stable/jenkins.repo
 
 sudo rpm --import \
     https://pkg.jenkins.io/redhat-stable/jenkins.io-2026.key
 
-
-# =========================================================
+# ============================================================
 # 10. INSTALL JENKINS
-# =========================================================
+# ============================================================
 
-echo "=========================================="
-echo " Installing Jenkins"
-echo "=========================================="
+echo ""
+echo "[10/12] Installing Jenkins..."
 
 sudo dnf install -y jenkins
 
+# ============================================================
+# 11. FORCE JENKINS TO USE JAVA 21
+# ============================================================
 
-# =========================================================
-# 11. CONFIGURE JENKINS TO USE JAVA 21
-# =========================================================
-
-echo "=========================================="
-echo " Configuring Jenkins for Java 21"
-echo "=========================================="
+echo ""
+echo "[11/12] Configuring Jenkins to use Java 21..."
 
 sudo mkdir -p \
     /etc/systemd/system/jenkins.service.d
@@ -208,182 +260,132 @@ Environment="JAVA_HOME=${JAVA_HOME_21}"
 Environment="JENKINS_JAVA_CMD=${JAVA_BIN_21}"
 EOF
 
-
-# =========================================================
-# 12. RELOAD SYSTEMD
-# =========================================================
-
-echo "=========================================="
-echo " Reloading systemd"
-echo "=========================================="
-
+# Reload systemd
 sudo systemctl daemon-reload
 
-
-# =========================================================
-# 13. ENABLE JENKINS
-# =========================================================
-
-echo "=========================================="
-echo " Enabling Jenkins"
-echo "=========================================="
-
+# Enable Jenkins at boot
 sudo systemctl enable jenkins
 
-
-# =========================================================
-# 14. START JENKINS
-# =========================================================
-
-echo "=========================================="
-echo " Starting Jenkins"
-echo "=========================================="
-
+# Start Jenkins
 sudo systemctl restart jenkins
 
-
-# =========================================================
-# 15. WAIT FOR JENKINS
-# =========================================================
-
-echo "=========================================="
-echo " Waiting for Jenkins"
-echo "=========================================="
+# Wait for Jenkins
+echo ""
+echo "Waiting for Jenkins to start..."
 
 sleep 10
 
-
-# =========================================================
-# 16. JENKINS STATUS
-# =========================================================
-
-echo "=========================================="
-echo " Jenkins Status"
-echo "=========================================="
-
-sudo systemctl status jenkins --no-pager || true
-
-
-# =========================================================
-# 17. JENKINS EFFECTIVE ENVIRONMENT
-# =========================================================
+# ============================================================
+# 12. FINAL VERIFICATION
+# ============================================================
 
 echo ""
-echo "=========================================="
-echo " Jenkins Environment"
-echo "=========================================="
+echo "============================================================"
+echo "                 FINAL VERIFICATION"
+echo "============================================================"
+
+echo ""
+echo "---------------- JAVA ----------------"
+
+echo "JAVA_HOME=${JAVA_HOME}"
+
+java -version
+
+echo ""
+echo "---------------- MAVEN ----------------"
+
+mvn --version
+
+echo ""
+echo "---------------- GIT ----------------"
+
+git --version
+
+echo ""
+echo "---------------- JENKINS ----------------"
+
+sudo systemctl is-enabled jenkins
+
+echo ""
+
+sudo systemctl is-active jenkins
+
+echo ""
+echo "---------------- JENKINS ENVIRONMENT ----------------"
 
 sudo systemctl show jenkins \
     --property=Environment \
     --no-pager
 
+echo ""
+echo "---------------- JENKINS STATUS ----------------"
 
-# =========================================================
-# 18. FIND JENKINS PROCESS
-# =========================================================
+sudo systemctl status jenkins \
+    --no-pager \
+    -l || true
+
+# ============================================================
+# CHECK JENKINS JAVA PROCESS
+# ============================================================
+
+echo ""
+echo "---------------- JENKINS JAVA PROCESS ----------------"
 
 JENKINS_PID="$(sudo systemctl show \
     -p MainPID \
-    --value jenkins)"
+    --value \
+    jenkins)"
 
 if [ -n "${JENKINS_PID}" ] && [ "${JENKINS_PID}" != "0" ]; then
 
-    echo ""
-    echo "=========================================="
-    echo " Jenkins Java Process"
-    echo "=========================================="
-
-    echo "Jenkins PID:"
-    echo "${JENKINS_PID}"
+    echo "Jenkins PID: ${JENKINS_PID}"
 
     echo ""
-
-    echo "Running Java executable:"
+    echo "Jenkins executable:"
     sudo readlink -f \
         "/proc/${JENKINS_PID}/exe" || true
 
+    echo ""
+    echo "Jenkins command:"
+    sudo ps -o args= \
+        -p "${JENKINS_PID}" || true
+
+else
+
+    echo "WARNING: Jenkins does not currently have a running PID."
+
 fi
 
-
-# =========================================================
-# 19. FINAL VERIFICATION
-# =========================================================
-
-echo ""
-echo "========================================================="
-echo "                 FINAL VERIFICATION"
-echo "========================================================="
+# ============================================================
+# FINAL RESULT
+# ============================================================
 
 echo ""
-echo "Java:"
-java -version
+echo "============================================================"
+echo "                 SETUP FINISHED"
+echo "============================================================"
 
-echo ""
-echo "Maven:"
-mvn --version
-
-echo ""
-echo "Git:"
-git --version
-
-echo ""
-echo "Jenkins package:"
-rpm -q jenkins
-
-echo ""
-echo "Jenkins service:"
-sudo systemctl is-active jenkins
-
-echo ""
-echo "Jenkins port:"
-sudo ss -lntp | grep ':8080' || true
-
-
-# =========================================================
-# 20. GET INITIAL ADMIN PASSWORD
-# =========================================================
-
-echo ""
-echo "========================================================="
-echo "              JENKINS INITIAL PASSWORD"
-echo "========================================================="
-
-if [ -f /var/lib/jenkins/secrets/initialAdminPassword ]; then
+if sudo systemctl is-active --quiet jenkins; then
 
     echo ""
-    echo "Initial Administrator Password:"
-    sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+    echo "SUCCESS: Jenkins is running."
+    echo ""
+    echo "Java 21 : CONFIGURED"
+    echo "Maven   : CONFIGURED"
+    echo "Git     : CONFIGURED"
+    echo "Jenkins : RUNNING"
+    echo ""
 
 else
 
     echo ""
-    echo "Initial password is not available yet."
-    echo "Check:"
-    echo "sudo cat /var/lib/jenkins/secrets/initialAdminPassword"
+    echo "WARNING: Jenkins is NOT running."
+    echo ""
+    echo "Check the logs with:"
+    echo ""
+    echo "sudo journalctl -u jenkins -n 100 --no-pager"
+    echo ""
 
 fi
 
-
-# =========================================================
-# COMPLETE
-# =========================================================
-
-echo ""
-echo "========================================================="
-echo "              INSTALLATION COMPLETE"
-echo "========================================================="
-
-echo ""
-echo "Java Home:"
-echo "${JAVA_HOME_21}"
-
-echo ""
-echo "Java Binary:"
-echo "${JAVA_BIN_21}"
-
-echo ""
-echo "Jenkins URL:"
-echo "http://YOUR-EC2-PUBLIC-IP:8080"
-
-echo ""
-echo "========================================================="
+echo "============================================================"
